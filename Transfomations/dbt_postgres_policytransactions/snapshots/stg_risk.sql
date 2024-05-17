@@ -17,6 +17,7 @@ concat(cast(stg.policy_uniqueid as varchar) , '_' , cast(stg.vin as varchar) ) r
 veh_effectivedate
 from {{ source('PolicyStats', 'stg_pt') }} stg
 where {{ incremental_condition() }}
+and vin='927079242285108675'
 )
 ,data as (select
 risk_uniqueid,

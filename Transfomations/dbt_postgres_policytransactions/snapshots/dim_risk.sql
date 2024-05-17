@@ -1,4 +1,4 @@
-{% snapshot dim_risk_io %}
+{% snapshot dim_risk %}
 
 
 
@@ -8,7 +8,7 @@
       target_schema='policy_trn',
       unique_key='risk_uniqueid',
       strategy='timestamp',
-      updated_at='transactioneffectivedate',
+      updated_at='transactioneffectivedate'
     )
 }}
 
@@ -24,6 +24,12 @@ transactioneffectivedate,
 row_number() over(partition by risk_uniqueid  order by transactioneffectivedate) rn
 from original_data
 )
+{% if  var('load_defaults')   %}
+
+{{ default_dim_risk() }}
+
+{% endif %}
+
 select distinct
 stg.policy_uniqueid,
 stg.transactioneffectivedate,
