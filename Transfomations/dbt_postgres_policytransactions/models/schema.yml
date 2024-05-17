@@ -1,0 +1,63 @@
+
+version: 2
+sources:
+  - name: PolicyStats
+    database: airflow
+    schema: policy_trn
+    tables:
+      - name: stg_pt
+    quoting:
+      database: true
+      schema: true
+      identifier: false
+models:
+  - name: dim_policy
+    description: "Auto policy dimension"
+    columns:
+      - name: policy_id
+        description: "The primary key for this table"
+        tests:
+          - unique
+          - not_null
+  - name: dim_coverage
+    description: "Coverage dimension"
+    columns:
+      - name: coverage_id
+        description: "The primary key for this table"
+        tests:
+          - unique
+          - not_null
+  - name: dim_limit
+    description: "Limits dimension"
+    config:
+      meta:
+        surrogate_key: true
+    columns:
+      - name: limit_id
+        description: "The primary key for this table"
+        tests:
+          - unique
+          - not_null
+  - name: dim_deductible
+    description: "Deductibles dimension"
+    columns:
+      - name: deductible_id
+        description: "The primary key for this table"
+        tests:
+          - unique
+          - not_null  
+  - name: dim_risk_bt
+    description: "DIM_RISK scd 2 later coming(not in order) changes" 
+    columns:
+      - name: dbt_scd_id
+        description: "The primary key for this table"
+        tests:
+          - unique
+          - not_null    
+  - name: dim_risk
+    description: "View combining DIM_RISK_IO and DIM_RISK_BT scd 2"    
+snapshots:          
+  - name: dim_risk_io
+    description: "Risk SC dimension type 2 for changes coming in a proper order"     
+  - name: stg_risk
+    description: "Risk staging for SC dimension type 2"  

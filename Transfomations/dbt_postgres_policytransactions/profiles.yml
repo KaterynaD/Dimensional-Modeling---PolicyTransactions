@@ -1,0 +1,12 @@
+dbt_postgres_policytransactions:
+  outputs:
+    dev:
+      dbname: airflow
+      host: 192.168.1.201
+      pass: kaktus
+      port: 5432
+      schema: policy_trn
+      threads: 1
+      type: postgres
+      user: kd
+  target: dev
