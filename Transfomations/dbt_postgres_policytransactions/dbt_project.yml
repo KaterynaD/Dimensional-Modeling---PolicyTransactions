@@ -29,10 +29,9 @@ vars:
   load_defaults: False
   loaddate: "1900-01-01"
   endloaddate: "3000-01-01"
-  new_transactiondate: "1900-01-01"  
   batch_num: 0
-  latest_loaded_date: "1900-01-01"
-  current_date: "1900-01-01"
+  latest_loaded_transactiondate: 19000101
+  new_transactiondate: 19000101
 
 # Configuring models
 # Full documentation: https://docs.getdbt.com/docs/configuring-models
