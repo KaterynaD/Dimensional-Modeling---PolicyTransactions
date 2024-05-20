@@ -10,7 +10,33 @@ sources:
       database: true
       schema: true
       identifier: false
+seeds:
+  - name: etl_history
+    description: "Imitating incremental load from full export. Only for training."
+    config:
+      column_types: 
+        transactiondate: integer   
+  - name: dim_transaction
+    description: "List of transaction types to create DIM_TANSACTION"
+    config:
+      column_types:
+        transaction_id: integer
+        transactioncd: varchar(50)
 models:
+  - name: etl_log
+    description: "Incremental load details"
+    columns:
+      - name: loaddate
+        description: "Timestamp of the load start. It's a primary key."
+        tests:
+          - unique
+          - not_null       
+      - name: transactiondate
+        description: "The latest Transaction Date in this load."
+        tests:
+          - not_null         
+      - name: endloaddate
+        description: "Timestamp of the load end"                 
   - name: dim_policy
     description: "Auto policy dimension"
     columns:
