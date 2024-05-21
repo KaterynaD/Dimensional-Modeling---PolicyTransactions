@@ -81,8 +81,12 @@ models:
           - unique
           - not_null
 
-snapshots:          
-  - name: dim_risk
-    description: "Risk SC dimension type 2 for changes coming in a proper order"     
-  - name: stg_risk
-    description: "Risk staging for SC dimension type 2"  
+  - name: dim_driver
+    description: "Driver scd2 dimension"
+    columns:
+      - name: driver_id
+        description: "The primary key for this table"
+        tests:
+          - unique
+          - not_null                    
+
