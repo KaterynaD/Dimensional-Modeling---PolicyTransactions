@@ -1,3 +1,3 @@
 {% macro full_load_condition() %}
-    stg.transactiondate='{{ var('current_date' ) }}'
+    stg.transactiondate='{{ var('new_transactiondate' ) }}'
 {% endmacro %}

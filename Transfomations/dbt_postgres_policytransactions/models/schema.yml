@@ -37,7 +37,7 @@ models:
           - not_null         
       - name: endloaddate
         description: "Timestamp of the load end"                 
-  - name: dim_policy
+  - name: dim_policy 
     description: "Auto policy dimension"
     columns:
       - name: policy_id
@@ -72,6 +72,15 @@ models:
         tests:
           - unique
           - not_null  
+  - name: dim_vehicle
+    description: "Vehicle scd2 dimension"
+    columns:
+      - name: vehicle_id
+        description: "The primary key for this table"
+        tests:
+          - unique
+          - not_null
+
 snapshots:          
   - name: dim_risk
     description: "Risk SC dimension type 2 for changes coming in a proper order"     

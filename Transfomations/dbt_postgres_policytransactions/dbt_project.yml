@@ -41,6 +41,9 @@ vars:
 # files using the `{{ config(...) }}` macro.
 models:
   dbt_postgres_policytransactions:
+    +persist_docs:
+      relation: true
+      columns: true  
 
 snapshots:   
   dbt_postgres_policytransactions:   

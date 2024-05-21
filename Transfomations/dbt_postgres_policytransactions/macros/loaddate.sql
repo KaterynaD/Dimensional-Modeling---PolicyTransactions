@@ -1,3 +1,3 @@
 {% macro loaddate() %}
-    to_date('{{ var('loaddate' ) }}', 'yyyy-mm-dd') loaddate
+    '{{ var('loaddate' ) }}'::timestamp without time zone loaddate
 {% endmacro %}
