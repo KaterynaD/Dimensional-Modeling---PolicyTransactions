@@ -19,6 +19,7 @@ select
 '~'::varchar(100) model,
 '~'::varchar(100) modelyr,
 '~'::varchar(100) manufacturer,
+'0'::varchar(100) estimatedannualdistance,
 {{ loaddate() }}
 from {{ ref('stg_vehicle') }} stg
 where 1=2 

@@ -24,10 +24,12 @@ from {{ source('PolicyStats', 'stg_pt') }} stg
 {% if is_incremental() %}
 
 where {{ incremental_condition() }}
+and  not exists (select 1 from {{ this }} dim where concat(cast(cast(stg.deductible1 as int) as varchar), '_', cast(cast(stg.deductible2 as int)as varchar))=concat(cast(cast(dim.deductible1 as int) as varchar), '_', cast(cast(dim.deductible2 as int)as varchar)))
 
 {% else %}
 
 where  {{ full_load_condition() }}
+and  (stg.deductible1<>0 and stg.deductible2<>0) /*default which we can not catch when dim does not exist*/
 
 {% endif %}
 

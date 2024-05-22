@@ -41,6 +41,7 @@ vars:
 # files using the `{{ config(...) }}` macro.
 models:
   dbt_postgres_policytransactions:   
+    +on_schema_change: "sync_all_columns"
     +persist_docs:
       relation: true
       columns: true  
