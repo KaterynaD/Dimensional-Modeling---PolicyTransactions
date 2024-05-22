@@ -1,5 +1,7 @@
 {{ config(materialized='incremental',
-  unique_key=['limit_id']) }}
+  unique_key=['limit_id'],
+  pre_hook='{{ dbt_log_insert() }}',
+  post_hook='{{ dbt_log_update() }}') }}
 
 
 

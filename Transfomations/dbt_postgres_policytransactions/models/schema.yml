@@ -11,20 +11,27 @@ sources:
       schema: true
       identifier: false
 seeds:
-  - name: etl_history
-    description: "Imitating incremental load from full export. Only for training."
+  - name: orchestration_history
+    description: "Imitating incremental load from full export. Only for demo/training."
     config:
+      tags:
+        - service    
       column_types: 
         transactiondate: integer   
   - name: dim_transaction
     description: "List of transaction types to create DIM_TANSACTION"
     config:
+      tags:
+        - dim    
       column_types:
         transaction_id: integer
         transactioncd: varchar(50)
 models:
-  - name: etl_log
-    description: "Incremental load details"
+  - name: orchestration_log
+    config:
+      tags:
+        - service      
+    description: "Orchestration load details"
     columns:
       - name: loaddate
         description: "Timestamp of the load start. It's a primary key."
@@ -36,8 +43,31 @@ models:
         tests:
           - not_null         
       - name: endloaddate
-        description: "Timestamp of the load end"                 
+        description: "Timestamp of the load end"     
+
+  - name: dbt_log
+    config:
+      tags:
+        - service      
+    description: "DBT load details"
+    columns:
+      - name: startdate
+        description: "Timestamp of the load start. It's a primary key."
+        tests:
+          - unique
+          - not_null       
+      - name: operation
+        description: "Logged operation."
+        tests:
+          - not_null         
+      - name: enddate
+        description: "Timestamp of the load end"  
+
+
   - name: dim_policy 
+    config:
+      tags:
+        - dim
     description: "Auto policy dimension"
     columns:
       - name: policy_id
@@ -46,6 +76,9 @@ models:
           - unique
           - not_null
   - name: dim_coverage
+    config:
+      tags:
+        - dim
     description: "Coverage dimension"
     columns:
       - name: coverage_id
@@ -54,6 +87,9 @@ models:
           - unique
           - not_null
   - name: dim_limit
+    config:
+      tags:
+        - dim
     description: "Limits dimension"
     config:
       meta:
@@ -65,6 +101,9 @@ models:
           - unique
           - not_null
   - name: dim_deductible
+    config:
+      tags:
+        - dim
     description: "Deductibles dimension"
     columns:
       - name: deductible_id
@@ -73,6 +112,10 @@ models:
           - unique
           - not_null  
   - name: dim_vehicle
+    config:
+      tags:
+        - dim
+        - scd2
     description: "Vehicle scd2 dimension"
     columns:
       - name: vehicle_id
@@ -82,6 +125,10 @@ models:
           - not_null
 
   - name: dim_driver
+    config:
+      tags:
+        - dim
+        - scd2
     description: "Driver scd2 dimension"
     columns:
       - name: driver_id

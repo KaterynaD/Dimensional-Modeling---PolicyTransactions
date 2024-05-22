@@ -1,4 +1,5 @@
 transaction_id,transactioncd
+0,Unknown
 1,Unapply
 2,Non-Renewal Rescind
 3,Reinstatement

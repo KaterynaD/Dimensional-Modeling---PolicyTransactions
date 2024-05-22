@@ -1,8 +1,8 @@
- {% macro etl_log_update() %} 
+ {% macro orchestration_log_update() %} 
 
  {% set update_endloaddate %}
 
- UPDATE {{ ref('etl_log') }}
+ UPDATE {{ ref('orchestration_log') }}
  SET endloaddate='{{ var('endloaddate' ) }}'
  WHERE loaddate='{{ var('loaddate' ) }}';
 

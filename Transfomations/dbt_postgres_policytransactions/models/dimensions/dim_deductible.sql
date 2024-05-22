@@ -1,5 +1,7 @@
 {{ config(materialized='incremental',
-  unique_key=['deductible_id']) }}
+  unique_key=['deductible_id'],
+  pre_hook='{{ dbt_log_insert() }}',
+  post_hook='{{ dbt_log_update() }}') }}
 
 
 

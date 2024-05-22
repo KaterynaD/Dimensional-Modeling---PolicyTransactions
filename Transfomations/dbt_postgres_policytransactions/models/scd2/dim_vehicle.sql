@@ -1,5 +1,7 @@
 {{ config(materialized='incremental',
-  unique_key=['vehicle_id']) }}
+   unique_key=['vehicle_id'],
+   pre_hook='{{ dbt_log_insert() }}',
+   post_hook='{{ dbt_log_update() }}') }}
 
 {% if  var('load_defaults')   %}
 

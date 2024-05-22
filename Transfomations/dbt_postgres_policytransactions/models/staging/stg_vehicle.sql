@@ -1,3 +1,4 @@
+{{ config(materialized='view') }}
 
 select distinct
 md5(coalesce(concat(cast(stg.policy_uniqueid as varchar) , '_' , cast(stg.vin as varchar) ) , '')

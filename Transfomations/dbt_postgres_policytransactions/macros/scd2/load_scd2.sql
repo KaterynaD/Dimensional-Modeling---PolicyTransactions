@@ -5,7 +5,9 @@
    but more aguments and updates is needed in the code
  */
 
- {% set insert_changed_data %}
+
+
+{% set insert_changed_data %}
 
 /*-------------------Forward Dated Changes-------------------------*/
 
@@ -128,12 +130,14 @@ where changed_data.{{dim_primary_key}} = {{ ref(dim_table_name) }}.{{dim_primary
 
 
 
- {% endset %}
+{% endset %}
 
+{% set run_operation =  ['load_scd2:', dim_table_name]|join(' ')   %}
 
-
+{{ dbt_log_insert(run_operation) }}
 
 {% do run_query(insert_changed_data) %}
 
+{{ dbt_log_update(run_operation) }}
 
 {% endmacro %}

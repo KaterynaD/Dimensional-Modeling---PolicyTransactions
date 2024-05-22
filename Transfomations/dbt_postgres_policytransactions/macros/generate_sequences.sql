@@ -18,7 +18,8 @@
         {% if flags.FULL_REFRESH or model.config.materialized == 'table' %}
         {# regenerate sequences if necessary #}
 
-        create or replace sequence {{ model.database }}.{{ model.schema }}.{{ model.name }}_seq;
+        drop  sequence if exists {{ model.database }}.{{ model.schema }}.{{ model.name }}_seq;
+        create  sequence {{ model.database }}.{{ model.schema }}.{{ model.name }}_seq;
 
         {% else %}
         {# create only if not exists for incremental models #}
