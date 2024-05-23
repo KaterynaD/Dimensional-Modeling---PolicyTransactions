@@ -3,6 +3,7 @@
   pre_hook='{{ dbt_log_insert() }}',
   post_hook='{{ dbt_log_update() }}')}}
 
+with data as (
 {% if  var('load_defaults')   %}
 
 {{ default_dim_coverage() }}
@@ -31,5 +32,12 @@ where {{ incremental_condition() }}
 where  {{ full_load_condition() }}
 
 {% endif %}
-
+)
+select
+data.coverage_id,
+data.coveragecd,
+data.subline,
+data.asl,
+data.loaddate
+from data
 

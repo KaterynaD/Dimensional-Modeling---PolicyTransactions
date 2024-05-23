@@ -6,6 +6,7 @@
 
 
 with stg_data as (
+
 select distinct
 stg.limit1,
 stg.limit2
@@ -24,19 +25,25 @@ and  (stg.limit1<>'~' and stg.limit2<>'~') /*default which we can not catch when
 {% endif %}
 
 
-
 )
-
+,data as (
 {% if  var('load_defaults')   %}
 
 {{ default_dim_limit() }}
 
 {% endif %}
-
+  
 select
 {{ increment_sequence() }} limit_id,
 limit1,
 limit2,
 {{ loaddate() }}
 from stg_data
+)
+select
+data.limit_id::integer as limit_id,
+data.limit1::varchar(100) as limit1,
+data.limit2::varchar(100) as limit2,
+data.loaddate::timestamp without time zone as loaddate
+from data
 

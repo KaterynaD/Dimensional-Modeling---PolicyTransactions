@@ -18,8 +18,8 @@ create temporary table new_data as
 with stg_data as (
 /*--new data in stage can have changes for the same uniqueid - historical load as an example --*/
 select distinct
-{{dim_primary_key}},
-{{  dim_change_date }},
+{{ dim_primary_key }},
+{{ dim_change_date }},
 {{ dim_unique_key }},
 {% for c in history_tracking_columns -%} 
 stg.{{ c }} {% if not loop.last %} , {% endif %}
@@ -29,7 +29,7 @@ from {{ ref(stg_data) }} stg
 /*-- we need existing data from dim to compare with new add/not add with/without changes --*/
 , existing_data as (
 select
-dim.{{dim_primary_key}},
+dim.{{ dim_primary_key }},
 dim.valid_fromdate {{  dim_change_date }},
 dim.{{ dim_unique_key }},
 {% for c in history_tracking_columns -%} 
@@ -44,8 +44,8 @@ select stg.* ,
 1 new_data
 from stg_data stg 
 left outer join existing_data dim 
-on stg.{{dim_primary_key}} = dim.{{dim_primary_key}}
-where  dim.{{dim_primary_key}} is null
+on stg.{{ dim_primary_key }} = dim.{{ dim_primary_key }}
+where  dim.{{ dim_primary_key }} is null
 union all
 /*--existing data for comparizon*/
 select *,
@@ -55,7 +55,7 @@ select *,
 select
 *,
 /*-----------------------------------------------------------*/
-coalesce(lead({{  dim_change_date }}) over (partition by {{ dim_unique_key }} order by {{  dim_change_date }}), '3000-01-01') valid_todate,
+coalesce(lead({{ dim_change_date }}) over (partition by {{ dim_unique_key }} order by {{  dim_change_date }}), '3000-12-31'::timestamp without time zone) valid_todate,
 /*-----------------------------------------------------------*/
 {% for c in history_tracking_columns -%} 
 lag({{ c }}) over (partition by {{dim_unique_key}} order by {{dim_change_date}}) lag_{{ c }} {% if not loop.last %} , {% endif %}
@@ -119,7 +119,7 @@ select
 {{dim_primary_key}},
 {{ dim_unique_key }},
 valid_fromdate,
-coalesce(lead(valid_fromdate) over (partition by {{ dim_unique_key }} order by valid_fromdate),'3000-01-01') valid_todate
+coalesce(lead(valid_fromdate) over (partition by {{ dim_unique_key }} order by valid_fromdate),'3000-12-31'::timestamp without time zone) valid_todate
 from {{ ref(dim_table_name) }} dim
 where {{ dim_unique_key }} in (select stg.{{ dim_unique_key }} from new_data stg)
 )

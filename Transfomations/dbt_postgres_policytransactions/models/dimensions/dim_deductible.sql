@@ -15,6 +15,7 @@ max_deductible as (select max(deductible_id) id from {{this}}),
 max_deductible as (select 0 id ),
 
 {% endif %}
+
 stg_data as (
 select distinct
 stg.deductible1,
@@ -36,6 +37,10 @@ and  (stg.deductible1<>0 and stg.deductible2<>0) /*default which we can not catc
 
 )
 
+
+
+, data as (
+
 {% if  var('load_defaults')   %}
 
 {{ default_dim_deductible() }}
@@ -48,6 +53,13 @@ deductible1,
 deductible2,
 {{ loaddate() }}
 from stg_data
+)
+select
+data.deductible_id::integer as deductible_id,
+data.deductible1::numeric as deductible1,
+data.deductible2::numeric as deductible2,
+data.loaddate::timestamp without time zone as loaddate
+from data
 
 
 

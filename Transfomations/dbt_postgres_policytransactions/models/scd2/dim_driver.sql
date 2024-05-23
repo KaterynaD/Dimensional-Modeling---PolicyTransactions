@@ -6,6 +6,7 @@
           ) 
   }}
 
+with data as (
 {% if  var('load_defaults')   %}
 
 {{ default_dim_driver() }}
@@ -14,14 +15,26 @@
 
 /*dummy select for linage only*/
 select
-'Unknown'::varchar(100) driver_id,
-'1900-01-01'::timestamp without time zone valid_fromdate,
-'3000-01-01'::timestamp without time zone valid_todate,
+'Unknown' driver_id,
+'1900-01-01' valid_fromdate,
+'3000-01-01' valid_todate,
 'Unknown' driver_uniqueid,
-'~'::varchar(10) gendercd,
-'1900-01-01'::varchar(10) birthdate,
-'~'::varchar(10) maritalstatuscd,
-0::varchar(3) pointscharged,
+'~' gendercd,
+'1900-01-01' birthdate,
+'~' maritalstatuscd,
+'0' pointscharged,
 {{ loaddate() }}
 from {{ ref('stg_driver') }} stg
 where 1=2 
+)
+select
+data.driver_id::varchar(100) as driver_id,
+data.valid_fromdate::timestamp without time zone as valid_fromdate,
+data.valid_todate::timestamp without time zone as valid_todate,
+data.driver_uniqueid::varchar(100) as driver_uniqueid,
+data.gendercd::varchar(10) as gendercd,
+data.birthdate::varchar(10) as birthdate,
+data.maritalstatuscd::varchar(10) as maritalstatuscd,
+data.pointscharged::varchar(3) as pointscharged,
+data.loaddate::timestamp without time zone as loaddate
+from data
