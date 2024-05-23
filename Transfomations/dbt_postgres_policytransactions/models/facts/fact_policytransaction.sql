@@ -61,15 +61,8 @@ on concat(cast(stg.policy_uniqueid as varchar) , '_' , cast(stg.riskcd1 as varch
 and (stg.veh_effectivedate >= dim_vehicle.valid_fromdate 
 and stg.veh_effectivedate < dim_vehicle.valid_todate)
 /*=======================================================================*/
-{% if is_incremental() %}
-
 where {{ incremental_condition() }}
 
-{% else %}
-
-where  {{ full_load_condition() }}
-
-{% endif %}
 
 )
 select
@@ -91,5 +84,6 @@ data.coverage_id::varchar(100) as coverage_id,
 data.limit_id::int as limit_id,
 data.deductible_id::int as deductible_id,
 /*-----------------------------------------------------------------------*/
-data.amount::numeric as amount
+data.amount::numeric as amount,
+{{ loaddate() }}
 from data
