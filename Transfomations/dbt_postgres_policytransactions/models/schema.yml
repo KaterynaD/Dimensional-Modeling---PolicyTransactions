@@ -306,3 +306,32 @@ models:
                 where: "loaddate = __latest_load__"
               to: ref('dim_vehicle')
               field: vehicle_id                
+  - name: dummy_agg_table
+    config:
+      tags:
+        - agg
+      grants:
+        select: ['report_user']        
+    description: "Demo table with a complex aggregation based on Fact_Policytransaction"              
+  - name: dummy_view_for_reporting
+    config:
+      grants:
+        select: ['report_user']        
+    description: "View for XYZ ableau dashboard. Business Owner: "   
+ 
+
+exposures:
+
+  - name: tableau
+    label: Tableau Dashboards
+    type: dashboard
+    maturity: high
+    description: "Some aggregations"
+
+    depends_on:
+      - ref('dummy_view_for_reporting')
+
+
+    owner:
+      name: Kate Drogaieva
+      email: drogaieva@gmail.com    
