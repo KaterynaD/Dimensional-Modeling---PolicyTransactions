@@ -17,14 +17,22 @@ from airflow import settings
 #
 import os
 import yaml
+import json
 from datetime import datetime
 #-----------------------------------------------GLOBAL VARIABLES--------------------------------------
 HOME = os.environ["AIRFLOW_HOME"] # retrieve the location of your home folder
 dbt_project='dbt_postgres_policytransactions'
 dbt_project_home = Variable.get('dbt_policy_trn')
 dbt_path = os.path.join(HOME,'dags', dbt_project_home)
+manifest_path = os.path.join(dbt_path, "target/manifest.json") # path to manifest.json
 dbt_conn_id = 'dbt_policy_trn_connection'
 #-----------------------------------------------PROCEDURES--------------------------------------
+def GetDBTNodes():
+    with open(manifest_path) as f: # Open manifest.json
+        manifest = json.load(f) # Load its contents into a Python Dictionary
+        nodes = manifest["nodes"] # Extract just the nodes
+        return nodes
+#-----------------------------------------------------------------------------------------------
 def SetLoadDate(ti):
     #I need the variable with Loaddate
     ti.xcom_push(key='LoadDate',value=format(datetime.today().replace(microsecond=0)))
@@ -84,6 +92,23 @@ def branch_Clear_DW_or_not(**kwargs):
 
     if airflow_variable_value == 'True':
         return "Clear_DW"
+    
+#-----------------------------------------------------------------------------------------------
+
+def branch_Is_Stgaging_Ready(**kwargs):
+    airflow_variable_value = kwargs['dag_run'].conf.get('dbt_policy_trn_validate_stg')
+
+    if airflow_variable_value == 'True':
+        return "Validate_Stg"    
+
+#-----------------------------------------------------------------------------------------------
+
+def branch_Load_Stg_or_not(**kwargs):
+    airflow_variable_value = kwargs['dag_run'].conf.get('dbt_policy_trn_load_stg')
+
+    if airflow_variable_value == 'True':
+        return "Load_Stg"
+            
 #-----------------------------------------------------------------------------------------------
 
 def branch_Load_Dims_or_not(**kwargs):
@@ -170,19 +195,22 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': d
         Set_Load_Date >> Sync_Connection
 
     #-----------------------------------------------Clear DW--------------------------------------
-
-    Clear_DW_or_not = PythonOperator(
+    @task_group(group_id="Clear_DW",prefix_group_id=True,tooltip="It's needed to start from scratch - empty tables or load history")
+    def Clear_DW():
+        Clear_DW_or_not = PythonOperator(
         task_id="Clear_DW_or_not",
         python_callable=branch_Clear_DW_or_not,
         dag=dag,
-    )
+        )
 
-    Clear_DW = BashOperator(
-        task_id="Clear_DW",
+        Full_Refresh_DW = BashOperator(
+        task_id="Full_Refresh_DW",
         bash_command='cd %s && dbt run --full-refresh --vars \'{"load_defaults":{{ var.value.dbt_policy_trn_load_defaults }}, "loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}","latest_loaded_transactiondate":"19000101","new_transactiondate":"19000101"}\''%dbt_path
         )
     
-    Do_not_Clear_Dw = EmptyOperator(task_id="Do_not_Clear_Dw")
+        Do_not_Clear_Dw = EmptyOperator(task_id="Do_not_Clear_Dw")
+
+        Clear_DW_or_not >> [Full_Refresh_DW, Do_not_Clear_Dw]
     
     @task_group(group_id="Incremental_Load_Range",prefix_group_id=True,tooltip="This task group initiates transaction dates range to load and starts a new entry in the orchestration_log",)
     def Incremental_Load_Range():
@@ -203,52 +231,89 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': d
 
         Latest_Loaded_TransactionDate >> New_TransactionDate >> Init_Orchestration_Log
 
-    #-----------------------------------------------LOAD DIMENSIONS--------------------------------------
+    #-----------------------------------------------STAGING VALIDATION--------------------------------------
+    @task_group(group_id="Staging_Validation",prefix_group_id=True,tooltip="Dummy Task. It might check S3 or End of Day Complete in the source system or if any new data present. Not a part of DBT workflow.")
+    def Staging_Validation():
+        Is_Stgaging_Ready = PythonOperator(
+        task_id="Is_Stgaging_Ready",
+        python_callable=branch_Is_Stgaging_Ready,
+        dag=dag,
+        )
 
-    Load_Dims_or_not = PythonOperator(
+        Validate_Stg = EmptyOperator(task_id="Validate_Stg",)
+    
+        Do_not_Validate_Stg = EmptyOperator(task_id="Do_not_Validate_Stg")  
+
+        Is_Stgaging_Ready >> [Validate_Stg, Do_not_Validate_Stg]
+
+    #-----------------------------------------------LOAD STAGING--------------------------------------
+    @task_group(group_id="Staging_Load",prefix_group_id=True,tooltip="Dummy Task. If there is no tool like FiveTran, a connect/query/export-import/load-to-from-S3 backet may needed")
+    def Staging_Load():
+        Load_Stg_or_not = PythonOperator(
+        task_id="Load_Stg_or_not",
+        python_callable=branch_Load_Stg_or_not,
+        dag=dag,
+        )
+
+        Load_Stg = EmptyOperator(task_id="Load_Stg")
+    
+        Do_not_Load_Stg = EmptyOperator(task_id="Do_not_Load_Stg")    
+
+        Load_Stg_or_not >> [Load_Stg, Do_not_Load_Stg]
+
+    #-----------------------------------------------LOAD DIMENSIONS------------------------------------------
+    @task_group(group_id="Dims_Load",prefix_group_id=True,tooltip="Load dimensions using run models and/or macros")
+    def Dims_Load():
+        Load_Dims_or_not = PythonOperator(
         task_id="Load_Dims_or_not",
         python_callable=branch_Load_Dims_or_not,
         dag=dag,
-    )
+        )
 
-    Load_Dims = BashOperator(
+        Load_Dims = BashOperator(
         task_id="Load_Dims",
         bash_command='cd %s && dbt run --full-refresh --vars \'{"load_defaults":{{ var.value.dbt_policy_trn_load_defaults }}, "loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}","latest_loaded_transactiondate":"19000101","new_transactiondate":"19000101"}\''%dbt_path
         )
     
-    Do_not_Load_Dims = EmptyOperator(task_id="Do_not_Load_Dims")  
+        Do_not_Load_Dims = EmptyOperator(task_id="Do_not_Load_Dims")  
+
+        Load_Dims_or_not >> [Load_Dims, Do_not_Load_Dims]
 
     #-----------------------------------------------LOAD FACTS--------------------------------------
-
-    Load_Facts_or_not = PythonOperator(
+    @task_group(group_id="Facts_Load",prefix_group_id=True,tooltip="Load fact tables using run models and/or macros")
+    def Facts_Load():
+        Load_Facts_or_not = PythonOperator(
         task_id="Load_Facts_or_not",
         python_callable=branch_Load_Facts_or_not,
         dag=dag,
-    )
+        )
 
-    Load_Facts = BashOperator(
+        Load_Facts = BashOperator(
         task_id="Load_Facts",
         bash_command='cd %s && dbt run --full-refresh --vars \'{"load_defaults":{{ var.value.dbt_policy_trn_load_defaults }}, "loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}","latest_loaded_transactiondate":"19000101","new_transactiondate":"19000101"}\''%dbt_path
-        )
+            )
     
-    Do_not_Load_Facts = EmptyOperator(task_id="Do_not_Load_Facts")       
+        Do_not_Load_Facts = EmptyOperator(task_id="Do_not_Load_Facts")   
+
+        Load_Facts_or_not >> [Load_Facts, Do_not_Load_Facts]  
 
     #-----------------------------------------------LOAD AGGREGATIONS---------------------------------
-
-    Load_Agg_or_not = PythonOperator(
+    @task_group(group_id="Agg_Load",prefix_group_id=True,tooltip="Load fact tables with complex aggregations or other complex transformations for reporting using run models and/or macros")
+    def Agg_Load():
+        Load_Agg_or_not = PythonOperator(
         task_id="Load_Agg_or_not",
         python_callable=branch_Load_Agg_or_not,
         dag=dag,
-    )
+        )
 
-    Load_Agg = BashOperator(
+        Load_Agg = BashOperator(
         task_id="Load_Agg",
         bash_command='cd %s && dbt run --full-refresh --vars \'{"load_defaults":{{ var.value.dbt_policy_trn_load_defaults }}, "loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}","latest_loaded_transactiondate":"19000101","new_transactiondate":"19000101"}\''%dbt_path
-        )
+            )
     
-    Do_not_Load_Agg = EmptyOperator(task_id="Do_not_Load_Agg")           
+        Do_not_Load_Agg = EmptyOperator(task_id="Do_not_Load_Agg")           
     
-    
+        Load_Agg_or_not >> [Load_Agg, Do_not_Load_Agg]
     #-----------------------------------------------END LOAD--------------------------------------
     @task_group(group_id="End_Load",prefix_group_id=True,tooltip="This task group finalizes load with update active record in etl_log",)
     def End_Load():
@@ -264,27 +329,42 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': d
         Set_End_Load_Date >> Complete_ETL_run_Log
 
         #-----------------------------------------------LOAD AGGREGATIONS---------------------------------
-
-    Test_Load_or_not = PythonOperator(
+    @task_group(group_id="Test_Load",prefix_group_id=True,tooltip="Test loaded data")
+    def Test_Load():
+        Test_Load_or_not = PythonOperator(
         task_id="Test_Load_or_not",
         python_callable=branch_Test_Load_or_not,
         dag=dag,
-    )
+        )
 
-    Test_Load = BashOperator(
+        Test_Load = BashOperator(
         task_id="Test_Load",
         bash_command='cd %s && dbt test --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}","latest_loaded_transactiondate":"19000101","new_transactiondate":"19000101"}\''%dbt_path
         )
     
-    Do_not_Test_Load = EmptyOperator(task_id="Do_not_Test_Load")           
+        Do_not_Test_Load = EmptyOperator(task_id="Do_not_Test_Load")           
     
+        Test_Load_or_not >> [Test_Load, Do_not_Test_Load]
 
     #-----------------------------------------------CHAIN of TASKS--------------------------------------
-
-    Start_Load() >> Clear_DW_or_not >> [Clear_DW,Do_not_Clear_Dw] >> Incremental_Load_Range() >> Load_Dims_or_not >> [Load_Dims,Do_not_Load_Dims] >> Load_Facts_or_not >> [Load_Facts,Do_not_Load_Facts] >> Load_Agg_or_not >> [Load_Agg,Do_not_Load_Agg] >> End_Load() >> Test_Load_or_not >> [Test_Load,Do_not_Test_Load]
-
-    #
-    #chain(
-    # Start_Load(),
-    # Clear_DW_or_not,
-    # end_load() )
+    chain(
+     Start_Load(),
+     #
+     Clear_DW(),
+     #
+     Incremental_Load_Range(),
+     #
+     Staging_Validation(),
+     #
+     Staging_Load(),
+     #
+     Dims_Load(),
+     #
+     Facts_Load(),
+     #
+     Agg_Load(),
+     #
+     End_Load(),
+     #
+     Test_Load()
+    )
