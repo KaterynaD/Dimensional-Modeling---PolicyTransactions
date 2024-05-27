@@ -6,9 +6,10 @@ from airflow.operators.python_operator import PythonOperator
 from airflow.hooks.postgres_hook import PostgresHook
 from airflow.operators.bash_operator import BashOperator
 from airflow.operators.empty import EmptyOperator
+from airflow.operators.email_operator import EmailOperator
 #
 from airflow.decorators import task_group
-from airflow.utils.edgemodifier import Label
+#from airflow.utils.edgemodifier import Label
 from airflow.models.baseoperator import chain
 #
 from airflow.models import Variable
@@ -27,8 +28,10 @@ dbt_path = os.path.join(HOME,'dags', dbt_project_home)
 manifest_path = os.path.join(dbt_path, "target/manifest.json") # path to manifest.json
 
 #path to SQL files used in the orchestration
-LatestLoadedTransactionDate_sql_path = os.path.join(dbt_path, "target/compiled/{dbt_project}/analysis/LatestLoadedTransactionDate.sql")
-NewTransactionDate_sql_path = os.path.join(dbt_path, "target/compiled/{dbt_project}/analysis/NewTransactionDate.sql")
+LatestLoadedTransactionDate_sql_path = os.path.join(dbt_path, f"target/compiled/{dbt_project}/analyses/LatestLoadedTransactionDate.sql")
+NewTransactionDate_sql_path = os.path.join(dbt_path, f"target/compiled/{dbt_project}/analyses/NewTransactionDate.sql")
+daily_load_sql_path = os.path.join(dbt_path, f"target/compiled/{dbt_project}/analyses/daily_load.sql")
+
 
 
 with open(manifest_path) as f: # Open manifest.json
@@ -222,20 +225,59 @@ def NewTransactionDate(ti):
             return record[0] 
 #-----------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------
+def LoadCompleteEmail():
+    email_body="<H2>Today's data:</H2>"
+    pg_hook = PostgresHook(postgres_conn_id=dbt_conn_id)
+    with open(daily_load_sql_path) as f: # Open sql file
+        sql = f.read()
+        records = pg_hook.get_records(sql)  
+        email_body += "<table border=1>"  
+        email_body += ("<tr><th>Table Name</th>" + 
+        "<th>Count Records on LoadDate</th>" +
+        "<th>LoadDate</th>" +
+        "<th>Total Records</th>" +
+        "<th>Latest Load on</th></tr>")
+        for record in records:  
+            email_body += ("<tr><td>" + str(record[0]) + "</td>" + 
+            "<td>" + str(record[1]) + "</td>"
+            "<td>" + str(record[2]) + "</td>"
+            "<td>" + str(record[3]) + "</td>"
+            "<td>" + str(record[4]) + "</td></tr>")
+        email_body += "</table>"
+
+
+#-----------------------------------------------------------------------------------------------
 def SetEndLoadDate(ti):
     #I need the variable with Loaddate
     ti.xcom_push(key='EndLoadDate',value=format(datetime.today().replace(microsecond=0)))
 
+#-----------------------------------------------------------------------------------------------
+def report_failure(context):
+    # include this check if you only want to get one email per DAG
+    #if(task_instance.xcom_pull(task_ids=None, dag_id=dag_id, key=dag_id) == True):
+    #    logging.info("Other failing task has been notified.")
+    send_email = EmailOperator(to='{{var.value.get("send_alert_to")}}',
+            subject=dbt_project + 'Load Failed'
+            )
+    send_email.execute(context)
 #----------------------------------------------- DAG --------------------------------------------
+args = {
+    'owner': 'airflow',
+    'on_failure_callback': report_failure ,
+    'email': '{{var.value.get("send_alert_to")}}',
+    'email_on_failure': True,
+    'email_on_retry': True,
+    'depends_on_past': False,
+    'start_date': days_ago(0)
+}
 
 
-
-with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': days_ago(1)},
+with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args=args,
     schedule_interval='0 23 * * *',
     catchup=False) as dag:
 #-----------------------------------------------START LOAD--------------------------------------
 
-    @task_group(group_id="Start_Load",prefix_group_id=True,tooltip="This task group initiate loadd date, sync SBT and Airflow connections",)
+    @task_group(group_id="Start_Load",prefix_group_id=True,tooltip="This task group initiate loadd date, sync DBT and Airflow connections",)
     def Start_Load():
         Set_Load_Date = PythonOperator(
             task_id="Set_Load_Date",
@@ -414,7 +456,19 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': d
         task_id='Complete_ETL_run_Log',
         bash_command='cd %s && dbt run-operation orchestration_log_update --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}", "endloaddate":"{{ti.xcom_pull(task_ids=\'end_load.Set_End_Load_Date\', key=\'EndLoadDate\')}}"}\''%dbt_path)
 
-        Set_End_Load_Date >> Complete_ETL_run_Log
+        Compile_daily_load_sql = BashOperator(
+        task_id="Compile_daily_load_sql",
+        bash_command='cd %s && dbt compile  --select daily_load --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}", "latest_loaded_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.Latest_Loaded_TransactionDate\', key=\'LatestLoadedTransactionDate\')}}"}\''%dbt_path
+        )
+
+        Load_Complete_Email = EmailOperator(
+        task_id='Load_Complete_Email',
+        to="{{var.value.get('send_alert_to')}}",
+        subject=dbt_project + ": Load Complete",
+        html_content=LoadCompleteEmail(),
+        dag=dag
+)
+        Set_End_Load_Date >> Complete_ETL_run_Log >> Compile_daily_load_sql >> Load_Complete_Email
 
     #-----------------------------------------------TEST LOAD---------------------------------
     @task_group(group_id="Test_Load",prefix_group_id=True,tooltip="Test loaded data")
