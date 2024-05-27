@@ -26,6 +26,11 @@ dbt_project_home = Variable.get('dbt_policy_trn')
 dbt_path = os.path.join(HOME,'dags', dbt_project_home)
 manifest_path = os.path.join(dbt_path, "target/manifest.json") # path to manifest.json
 
+#path to SQL files used in the orchestration
+LatestLoadedTransactionDate_sql_path = os.path.join(dbt_path, "target/compiled/{dbt_project}/analysis/LatestLoadedTransactionDate.sql")
+NewTransactionDate_sql_path = os.path.join(dbt_path, "target/compiled/{dbt_project}/analysis/NewTransactionDate.sql")
+
+
 with open(manifest_path) as f: # Open manifest.json
         manifest = json.load(f) # Load its contents into a Python Dictionary
         nodes = manifest["nodes"] # Extract just the nodes
@@ -124,9 +129,9 @@ def dbt_nodes(node_tags, stg_Start_Node):
                                     )      
             dbt_tasks[node_id] = BashOperator(
                         task_id=task_id,
-                        bash_command=f"cd {dbt_path}" # Go to the path containing your dbt project
-                        + f" && dbt run --select {node_info['name']}",# run the selected model!
+                        bash_command='cd %s && dbt run --select %s --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'Start_Load.Set_Load_Date\', key=\'LoadDate\')}}", "latest_loaded_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.Latest_Loaded_TransactionDate\', key=\'LatestLoadedTransactionDate\')}}, "new_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.New_TransactionDate\', key=\'NewTransactionDate\')}}"}\''%(dbt_path,node_info["name"]),
                         dag=dag)         
+
 
 
     # Define relationships between Operators only inside the same "tag"
@@ -149,7 +154,7 @@ def dbt_nodes(node_tags, stg_Start_Node):
                         if upstream_node in dbt_tasks:
                             dbt_tasks[upstream_node] >> dbt_tasks[node_id]
 
-
+    return dbt_tasks[stg_Start_Node]
 #-----------------------------------------------------------------------------------------------
 
 def branch_Load_Dims_or_not(**kwargs):
@@ -194,12 +199,13 @@ def branch_Refresh_Dashboards_or_not(**kwargs):
 
 def LatestLoadedTransactionDate(ti):
     pg_hook = PostgresHook(postgres_conn_id=dbt_conn_id)
-    sql = "SELECT transactiondate FROM policy_trn.etl_log WHERE LoadDate=(select max(loaddate) from policy_trn.etl_log where endloaddate is not null)"
     try:
-        records = pg_hook.get_records(sql) 
-        for record in records:    
-            ti.xcom_push(key='LatestLoadedTransactionDate',value=f'{record[0]}')
-            return record[0]    
+        with open(LatestLoadedTransactionDate_sql_path) as f: # Open sql file
+            sql = f.read()
+            records = pg_hook.get_records(sql) 
+            for record in records:    
+                ti.xcom_push(key='LatestLoadedTransactionDate',value=f'{record[0]}')
+                return record[0]    
     except:
         ti.xcom_push(key='LatestLoadedTransactionDate',value='19000101')
         return '19000101'  
@@ -208,12 +214,12 @@ def LatestLoadedTransactionDate(ti):
 #-----------------------------------------------------------------------------------------------
 def NewTransactionDate(ti):
     pg_hook = PostgresHook(postgres_conn_id=dbt_conn_id)
-    LatestLoadedTransactionDate=ti.xcom_pull(task_ids='start_load.Latest_Loaded_TransactionDate', key='LatestLoadedTransactionDate')
-    sql = f"SELECT min(transactiondate) transactiondate FROM policy_trn.etl_history WHERE transactiondate>{LatestLoadedTransactionDate}"
-    records = pg_hook.get_records(sql) 
-    for record in records:    
-        ti.xcom_push(key='NewTransactionDate',value=f'{record[0]}')
-        return record[0] 
+    with open(NewTransactionDate_sql_path) as f: # Open sql file
+        sql = f.read()
+        records = pg_hook.get_records(sql)    
+        for record in records:    
+            ti.xcom_push(key='NewTransactionDate',value=f'{record[0]}')
+            return record[0] 
 #-----------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------
 def SetEndLoadDate(ti):
@@ -254,19 +260,36 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': d
 
         Full_Refresh_DW = BashOperator(
         task_id="Full_Refresh_DW",
-        bash_command='cd %s && dbt run --full-refresh --vars \'{"load_defaults":{{ var.value.dbt_policy_trn_load_defaults }}, "loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}","latest_loaded_transactiondate":"19000101","new_transactiondate":"19000101"}\''%dbt_path
+        bash_command='cd %s && dbt run --full-refresh --vars \'{"load_defaults":{{ var.value.dbt_policy_trn_load_defaults }}, "loaddate":"{{ti.xcom_pull(task_ids=\'Start_Load.Set_Load_Date\', key=\'LoadDate\')}}","latest_loaded_transactiondate":"19000101","new_transactiondate":"19000101"}\''%dbt_path
         )
+
+        Seed_DW = BashOperator(
+        task_id="Seed_DW",
+        bash_command='cd %s && dbt seed'%dbt_path
+        )        
     
         Do_not_Clear_Dw = EmptyOperator(task_id="Do_not_Clear_Dw")
 
         Clear_DW_or_not >> [Full_Refresh_DW, Do_not_Clear_Dw]
+        Full_Refresh_DW >> Seed_DW
     #-----------------------------------------------INCREMENTAL LOAD RANGE--------------------------------------    
     @task_group(group_id="Incremental_Load_Range",prefix_group_id=True,tooltip="This task group initiates transaction dates range to load and starts a new entry in the orchestration_log",)
     def Incremental_Load_Range():
+
+        Compile_Latest_Loaded_TransactionDate_sql = BashOperator(
+        task_id="Compile_Latest_Loaded_TransactionDate_sql",
+        bash_command='cd %s && dbt compile  --select LatestLoadedTransactionDate --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}"}\''%dbt_path
+        )        
+
         Latest_Loaded_TransactionDate = PythonOperator(
             task_id='Latest_Loaded_TransactionDate',
             python_callable=LatestLoadedTransactionDate,
             provide_context=True)
+        
+        Compile_New_TransactionDate_sql = BashOperator(
+        task_id="Compile_New_TransactionDate_sql",
+        bash_command='cd %s && dbt compile  --select NewTransactionDate --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}", "latest_loaded_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.Latest_Loaded_TransactionDate\', key=\'LatestLoadedTransactionDate\')}}"}\''%dbt_path
+        )             
 
         New_TransactionDate = PythonOperator(
             task_id='New_TransactionDate',
@@ -275,10 +298,10 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': d
 
         Init_Orchestration_Log = BashOperator(
             task_id='Init_Orchestration_Log',
-            bash_command='cd %s && dbt run --select orchestration_log --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}", "new_transactiondate":"{{ti.xcom_pull(task_ids=\'start_load.New_TransactionDate\', key=\'NewTransactionDate\')}}"}\''%dbt_path
+            bash_command='cd %s && dbt run --select orchestration_log --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'Start_Load.Set_Load_Date\', key=\'LoadDate\')}}", "new_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.New_TransactionDate\', key=\'NewTransactionDate\')}}"}\''%dbt_path
             )
 
-        Latest_Loaded_TransactionDate >> New_TransactionDate >> Init_Orchestration_Log
+        Compile_Latest_Loaded_TransactionDate_sql >> Latest_Loaded_TransactionDate >> Compile_New_TransactionDate_sql >> New_TransactionDate >> Init_Orchestration_Log
 
     #-----------------------------------------------STAGING VALIDATION--------------------------------------
     @task_group(group_id="Staging_Validation",prefix_group_id=True,tooltip="Dummy Task. It might check S3 or End of Day Complete in the source system or if any new data present. Not a part of DBT workflow.")
@@ -323,13 +346,27 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': d
 
         @task_group(group_id="Load_Dim",prefix_group_id=True,tooltip="Load Dimensions")
         def Load_Dim():
-            dbt_nodes(["dim"], "Start_Dim_Load_log")
-        
-        #ADD load SCD2 from macros
+
+            Start_Dim_Load_log = dbt_nodes(["dim"], "Start_Dim_Load_log") 
+                    
+            Load_scd2_dim_vehicle = BashOperator(
+                        task_id="Load_scd2_dim_vehicle",
+                        bash_command='cd %s && dbt run-operation load_scd2 --args \'{"dim_table_name":"dim_vehicle","stg_data":"stg_vehicle","dim_primary_key":"vehicle_id","dim_unique_key":"vehicle_uniqueid","dim_change_date":"transactioneffectivedate","history_tracking_columns":["vin", "model", "modelyr", "manufacturer", "estimatedannualdistance"]}\' --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'Start_Load.Set_Load_Date\', key=\'LoadDate\')}}", "latest_loaded_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.Latest_Loaded_TransactionDate\', key=\'LatestLoadedTransactionDate\')}}, "new_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.New_TransactionDate\', key=\'NewTransactionDate\')}}"}\''%dbt_path,# run the selected model!
+                        dag=dag)   
+
+            Load_scd2_dim_driver = BashOperator(
+                        task_id="Load_scd2_dim_driver",
+                        bash_command='cd %s && dbt run-operation load_scd2 --args \'{"dim_table_name":"dim_driver","stg_data":"stg_driver","dim_primary_key":"driver_id","dim_unique_key":"driver_uniqueid","dim_change_date":"transactioneffectivedate","history_tracking_columns":["gendercd", "birthdate", "maritalstatuscd", "pointscharged"]}\' --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'Start_Load.Set_Load_Date\', key=\'LoadDate\')}}", "latest_loaded_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.Latest_Loaded_TransactionDate\', key=\'LatestLoadedTransactionDate\')}}, "new_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.New_TransactionDate\', key=\'NewTransactionDate\')}}"}\''%dbt_path,# run the selected model!
+                        dag=dag)               
+
+            Start_Dim_Load_log >> Load_scd2_dim_vehicle 
+            Start_Dim_Load_log >> Load_scd2_dim_driver             
 
         Do_not_Load_Dims = EmptyOperator(task_id="Do_not_Load_Dims_log")  
 
-        Load_Dims_or_not >> [Load_Dim(), Do_not_Load_Dims]
+        Load_Dims_or_not >> [Load_Dim() , Do_not_Load_Dims]
+
+
 
     #-----------------------------------------------LOAD FACTS--------------------------------------
     @task_group(group_id="Facts_Load",prefix_group_id=True,tooltip="Load fact tables using run models and/or macros")
@@ -356,13 +393,11 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': d
         python_callable=branch_Load_Agg_or_not,
         dag=dag,
         )
-
-        Load_Agg = BashOperator(
-        task_id="Load_Agg",
-        bash_command='cd %s && dbt run --full-refresh --vars \'{"load_defaults":{{ var.value.dbt_policy_trn_load_defaults }}, "loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}","latest_loaded_transactiondate":"19000101","new_transactiondate":"19000101"}\''%dbt_path
-            )
         
-        #add macros call
+        Load_Agg = BashOperator(
+                        task_id="Load_Agg",
+                        bash_command='cd %s && dbt run-operation load_dummy_agg_table --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'Start_Load.Set_Load_Date\', key=\'LoadDate\')}}", "latest_loaded_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.Latest_Loaded_TransactionDate\', key=\'LatestLoadedTransactionDate\')}}, "new_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.New_TransactionDate\', key=\'NewTransactionDate\')}}"}\''%dbt_path,# run the selected model!
+                        dag=dag)   
     
         Do_not_Load_Agg = EmptyOperator(task_id="Do_not_Load_Agg")           
     
@@ -392,7 +427,7 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args={'start_date': d
 
         Test_Load = BashOperator(
         task_id="Test_Load",
-        bash_command='cd %s && dbt test --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'start_load.Set_Load_Date\', key=\'LoadDate\')}}","latest_loaded_transactiondate":"19000101","new_transactiondate":"19000101"}\''%dbt_path
+        bash_command='cd %s && dbt test --vars \'{"loaddate":"{{ti.xcom_pull(task_ids=\'Start_Load.Set_Load_Date\', key=\'LoadDate\')}}", "latest_loaded_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.Latest_Loaded_TransactionDate\', key=\'LatestLoadedTransactionDate\')}}, "new_transactiondate":"{{ti.xcom_pull(task_ids=\'Incremental_Load_Rang.New_TransactionDate\', key=\'NewTransactionDate\')}}"}\''%dbt_path,# run the selected model!
         )
     
         Do_not_Test_Load = EmptyOperator(task_id="Do_not_Test_Load")           
