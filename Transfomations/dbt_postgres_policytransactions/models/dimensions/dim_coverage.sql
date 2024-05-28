@@ -17,9 +17,9 @@ select distinct
                 'asl'
             ])
         }} coverage_id,
-stg.coveragecd,
-stg.subline,
-stg.asl,
+coalesce(stg.coveragecd,'~') as coveragecd,
+coalesce(stg.subline,'~') as subline,
+coalesce(stg.asl,'~') as asl,
 {{ loaddate() }}
 from {{ source('PolicyStats', 'stg_pt') }} stg
 

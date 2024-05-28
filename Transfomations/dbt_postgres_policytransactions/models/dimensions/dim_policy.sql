@@ -43,15 +43,15 @@ group by policy_uniqueid
 {% endif %}
 
 select distinct
-stg.policy_uniqueid policy_id,
-stg.policy_uniqueid,
-stg.policynumber,
-stg.effectivedate,
-stg.expirationdate,
-stg.inceptiondate,
-stg.policystate,
-stg.carriercd,
-stg.companycd,
+coalesce(stg.policy_uniqueid,0) as policy_id,
+coalesce(stg.policy_uniqueid,0) as policy_uniqueid,
+coalesce(stg.policynumber,'~') as policynumber,
+coalesce(stg.effectivedate,'1900-01-01') as effectivedate,
+coalesce(stg.expirationdate,'1900-01-01') as expirationdate,
+coalesce(stg.inceptiondate,'1900-01-01') as inceptiondate,
+coalesce(stg.policystate,'~') as policystate,
+coalesce(stg.carriercd,'~') as carriercd,
+coalesce(stg.companycd,'~') as companycd,
 {{ loaddate() }}
 from {{ source('PolicyStats', 'stg_pt') }} stg
 join most_latest_data

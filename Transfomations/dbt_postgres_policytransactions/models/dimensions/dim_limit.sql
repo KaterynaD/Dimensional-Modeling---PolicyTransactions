@@ -8,8 +8,8 @@
 with stg_data as (
 
 select distinct
-stg.limit1,
-stg.limit2
+coalesce(stg.limit1,'~') as limit1,
+coalesce(stg.limit2,'~') as limit2
 from {{ source('PolicyStats', 'stg_pt') }} stg
 
 {% if is_incremental() %}

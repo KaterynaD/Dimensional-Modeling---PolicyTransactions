@@ -18,8 +18,8 @@ max_deductible as (select 0 id ),
 
 stg_data as (
 select distinct
-stg.deductible1,
-stg.deductible2
+coalesce(stg.deductible1, 0) as deductible1,
+coalesce(stg.deductible2, 0) as deductible2
 from {{ source('PolicyStats', 'stg_pt') }} stg
 
 {% if is_incremental() %}
