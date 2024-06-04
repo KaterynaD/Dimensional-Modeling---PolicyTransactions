@@ -4,7 +4,12 @@ from airflow.utils.dates import days_ago
 #
 from airflow.operators.python_operator import PythonOperator
 from airflow.operators.python import BranchPythonOperator
-from airflow.hooks.postgres_hook import PostgresHook
+
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
+from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
+
+from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
+
 from airflow.operators.bash_operator import BashOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.email_operator import EmailOperator
@@ -23,7 +28,7 @@ import json
 from datetime import datetime
 #-----------------------------------------------GLOBAL VARIABLES--------------------------------------
 HOME = os.environ["AIRFLOW_HOME"] # retrieve the location of your home folder
-dbt_project='dbt_postgres_policytransactions'
+dbt_project='dbt_snowflake_policytransactions'
 dbt_project_home = Variable.get('dbt_policy_trn')
 dbt_path = os.path.join(HOME,'dags', dbt_project_home)
 manifest_path = os.path.join(dbt_path, "target/manifest.json") # path to manifest.json
@@ -39,7 +44,7 @@ with open(manifest_path) as f: # Open manifest.json
         manifest = json.load(f) # Load its contents into a Python Dictionary
         nodes = manifest["nodes"] # Extract just the nodes
 
-dbt_conn_id = 'dbt_policy_trn_connection'
+dbt_conn_id = 'dbt_snowflake_connection'
 #-----------------------------------------------PROCEDURES--------------------------------------
 #-----------------------------------------------------------------------------------------------
 def SetLoadDate(ti):
@@ -47,16 +52,20 @@ def SetLoadDate(ti):
     ti.xcom_push(key='LoadDate',value=format(datetime.today().replace(microsecond=0)))
 #-----------------------------------------------------------------------------------------------
 def SyncConnection():
-    with open(os.path.join(dbt_path,'profiles.yml')) as stream:
+   with open(os.path.join(dbt_path,'profiles.yml')) as stream:
         try:  
-            profile=yaml.safe_load(stream)[dbt_project]['outputs']['dev'] #can have a var to switch between dev and prod the same in this project
+            profile=yaml.safe_load(stream)[dbt_project]['outputs']['dev']
 
             conn_type=profile['type']
             username=profile['user']
-            password=profile['pass']            
-            host=profile['host']
-            port=profile['port']
-            db=profile['dbname']
+            password=profile['password']    
+            host='https://kdszsfp-nvb47448.snowflakecomputing.com/'
+            role=profile['role']                     
+            account=profile['account']
+            warehouse=profile['warehouse']
+            database=profile['database']
+            schema=profile['schema']
+            extra = json.dumps(dict(account=account, database=database,  warehouse=warehouse, role=role))
 
             session = settings.Session()           
 
@@ -66,10 +75,11 @@ def SyncConnection():
                 new_conn.conn_type = conn_type
                 new_conn.login = username
                 new_conn.password = password
-                new_conn.host = host
-                new_conn.port = port
-                new_conn.schema = db                     
-
+                new_conn.host= host
+                new_conn.schema = schema 
+                new_conn.extra = extra
+                                    
+                
             except:
 
                 new_conn = Connection(conn_id=dbt_conn_id,
@@ -77,12 +87,15 @@ def SyncConnection():
                                   login=username,
                                   password=password,
                                   host=host,
-                                  port=port,
-                                  schema=db)   
-
+                                  schema=schema,
+                                  extra = extra
+                                     )
+                
             
             session.add(new_conn)
             session.commit()    
+
+    
 
         
         except yaml.YAMLError as exc:
@@ -97,11 +110,17 @@ def branch_Clear_DW_or_not():
         return "Clear_DW.Do_not_Clear_DW_log"
     
 #-----------------------------------------------------------------------------------------------
+def branch_Extract_Data_or_not():
 
+    if Variable.get("dbt_policy_trn_extract_data") == 'Y':
+        return "Data_Extract.Extract_Data"
+    else:
+        return "Data_Extract.Do_not_Extract_Data_log"
+#-----------------------------------------------------------------------------------------------
 def branch_Is_Stgaging_Ready():
 
     if Variable.get("dbt_policy_trn_validate_stg") == 'Y':
-        return "Staging_Validation.Validate_Stg"    
+        return "Staging_Validation.Wait_For_Extract"    
     else:
         return "Staging_Validation.Do_not_Validate_Stg_log"
 #-----------------------------------------------------------------------------------------------
@@ -109,7 +128,7 @@ def branch_Is_Stgaging_Ready():
 def branch_Load_Stg_or_not():
 
     if Variable.get("dbt_policy_trn_load_stg") == 'Y':
-        return "Staging_Load.Load_Stg.Start_Stg_Load_log"
+        return "Staging_Load.Load_Stg.Copy_Source_Data"
     else:
         return "Staging_Load.Do_not_Load_Stg_log"
 #-----------------------------------------------------------------------------------------------
@@ -203,7 +222,7 @@ def branch_Refresh_Dashboards_or_not():
 #-----------------------------------------------------------------------------------------------
 
 def LatestLoadedTransactionDate(ti):
-    pg_hook = PostgresHook(postgres_conn_id=dbt_conn_id)
+    pg_hook = SnowflakeHook(snowflake_conn_id=dbt_conn_id)
     try:
         with open(LatestLoadedTransactionDate_sql_path) as f: # Open sql file
             sql = f.read()
@@ -222,7 +241,7 @@ def LatestLoadedTransactionDate(ti):
     #return '19000101' 
 #-----------------------------------------------------------------------------------------------
 def NewTransactionDate(ti):
-    pg_hook = PostgresHook(postgres_conn_id=dbt_conn_id)
+    pg_hook = SnowflakeHook(snowflake_conn_id=dbt_conn_id)
     with open(NewTransactionDate_sql_path) as f: # Open sql file
         sql = f.read()
         records = pg_hook.get_records(sql) 
@@ -237,7 +256,7 @@ def NewTransactionDate(ti):
 #-----------------------------------------------------------------------------------------------
 def LoadCompleteEmail():
     email_body="<H2>Today's data:</H2>"
-    pg_hook = PostgresHook(postgres_conn_id=dbt_conn_id)
+    pg_hook = SnowflakeHook(snowflake_conn_id=dbt_conn_id)
     with open(daily_load_sql_path) as f: # Open sql file
         sql = f.read()
         records = pg_hook.get_records(sql)  
@@ -283,7 +302,7 @@ args = {
 }
 
 
-with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args=args,
+with DAG(dag_id="Snowflake_PolicyTransactions_dag",default_args=args,
     schedule_interval='0 23 * * *',
     catchup=False) as dag:
 #-----------------------------------------------START LOAD--------------------------------------
@@ -356,6 +375,34 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args=args,
             )
 
         Compile_Latest_Loaded_TransactionDate_sql >> Latest_Loaded_TransactionDate >> Compile_New_TransactionDate_sql >> New_TransactionDate >> Init_Orchestration_Log
+    #-----------------------------------------------Extract--------------------------------------
+    @task_group(group_id="Data_Extract",prefix_group_id=True,tooltip="Simulating extract data from a source.")
+    def Data_Extract():
+        Extract_Data_or_not = BranchPythonOperator(
+        task_id="Extract_Data_or_not",
+        provide_context=True,
+        python_callable=branch_Extract_Data_or_not,
+        dag=dag,
+        )
+
+        Extract_Data = SQLExecuteQueryOperator(
+        task_id="Extract_Data",
+        conn_id=dbt_conn_id,
+        sql="""
+            copy into @control_db.external_stages.policy_trn_stage/new_policy_trn
+            from (select * from mytest_db.policy_trn_source.stg_pt
+            where transactiondate>%(latest_loaded_transactiondate)s and transactiondate<=%(new_transactiondate)s)
+            file_format = (type = csv field_optionally_enclosed_by='"')
+            OVERWRITE=TRUE;
+          """,
+        parameters={"latest_loaded_transactiondate":"{{ti.xcom_pull(task_ids='Incremental_Load_Range.Latest_Loaded_TransactionDate', key='LatestLoadedTransactionDate')}}", "new_transactiondate":"{{ti.xcom_pull(task_ids='Incremental_Load_Range.New_TransactionDate', key='NewTransactionDate')}}"}
+    )
+
+    
+    
+        Do_not_Extract_Data_log = EmptyOperator(task_id="Do_not_Extract_Data_log")
+
+        Extract_Data_or_not >> [Extract_Data, Do_not_Extract_Data_log]
 
     #-----------------------------------------------STAGING VALIDATION--------------------------------------
     @task_group(group_id="Staging_Validation",prefix_group_id=True,tooltip="Dummy Task. It might check S3 or End of Day Complete in the source system or if any new data present. Not a part of DBT workflow.")
@@ -368,13 +415,25 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args=args,
         trigger_rule="one_success"
         )
 
-        Validate_Stg = EmptyOperator(task_id="Validate_Stg",)
+
+        Wait_For_Extract = S3KeySensor(
+        task_id='Wait_For_Extract',
+        bucket_name='kd-projects',
+        bucket_key='policy_trn/new_policy_trn*',
+        wildcard_match = True,
+        aws_conn_id='aws_default',
+        poke_interval=60,
+        mode="poke",
+        timeout= 600,
+        # soft_fail=True,
+        dag=dag
+        )   
         
     
         Do_not_Validate_Stg_log = EmptyOperator(task_id="Do_not_Validate_Stg_log")  
                 
 
-        Is_Stgaging_Ready >> [Validate_Stg, Do_not_Validate_Stg_log]
+        Is_Stgaging_Ready >> [Wait_For_Extract, Do_not_Validate_Stg_log]
 
     #-----------------------------------------------LOAD STAGING--------------------------------------
     @task_group(group_id="Staging_Load",prefix_group_id=True,tooltip="If any additional transformtions are needed to shape staging data - a connect/query/export-import/load-to-from-S3 backet")
@@ -389,7 +448,21 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args=args,
 
         @task_group(group_id="Load_Stg",prefix_group_id=True,tooltip="Dummy Task. If there is no tool like FiveTran, a connect/query/export-import/load-to-from-S3 backet may needed")
         def Load_Stg():
-            dbt_nodes(["stg"], "Start_Stg_Load_log")
+            
+            Copy_Source_Data = SQLExecuteQueryOperator(
+                        task_id="Copy_Source_Data",
+                        conn_id=dbt_conn_id,
+                        sql="""
+                                copy into mytest_db.policy_trn_staging.stg_pt 
+                                from @control_db.external_stages.policy_trn_stage/new_policy_trn
+                                file_format = (FORMAT_NAME='control_db.file_formats.csv_format');
+                            """,
+                            dag=dag)
+                        
+            dbt_staging_log = dbt_nodes(["stg"], "Start_Stg_Load_log")
+
+
+            Copy_Source_Data >> dbt_staging_log
   
         Do_not_Load_Stg = EmptyOperator(task_id="Do_not_Load_Stg_log") 
 
@@ -492,8 +565,17 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args=args,
         subject=dbt_project + ": Load Complete",
         html_content=LoadCompleteEmail(),
         dag=dag
-)
-        Set_End_Load_Date >> Complete_ETL_run_Log >> Compile_daily_load_sql >> Load_Complete_Email
+        )
+
+        Remove_Source_Data = SQLExecuteQueryOperator(
+        task_id="Remove_Source_Data",
+        conn_id=dbt_conn_id,
+        sql="""
+            REMOVE @control_db.external_stages.policy_trn_stage/new_policy_trn;
+        """,
+        dag=dag)
+
+        Set_End_Load_Date >> Complete_ETL_run_Log >> Compile_daily_load_sql >> Load_Complete_Email >> Remove_Source_Data
 
     #-----------------------------------------------TEST LOAD---------------------------------
     @task_group(group_id="Test_Load",prefix_group_id=True,tooltip="Test loaded data")
@@ -539,6 +621,8 @@ with DAG(dag_id="Postgress_PolicyTransactions_dag",default_args=args,
      Clear_DW(),
      #
      Incremental_Load_Range(),
+     #
+     Data_Extract(),
      #
      Staging_Validation(),
      #

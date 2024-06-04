@@ -3,7 +3,7 @@ version: 2
 sources:
   - name: PolicyStats
     database: mytest_db
-    schema: policy_trn_source
+    schema: policy_trn_staging
     tables:
       - name: stg_pt
     quoting:
