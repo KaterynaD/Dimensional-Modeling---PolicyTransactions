@@ -48,11 +48,13 @@ and  (stg.deductible1<>0 and stg.deductible2<>0) /*default which we can not catc
 {% endif %}
 
 select
-ROW_NUMBER() OVER(order by deductible1, deductible2) deductible_id,
+max_deductible.id + ROW_NUMBER() OVER(order by deductible1, deductible2) deductible_id,
 deductible1,
 deductible2,
 {{ loaddate() }}
 from stg_data
+join max_deductible
+on 1=1
 )
 select
 data.deductible_id::integer as deductible_id,
