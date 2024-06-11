@@ -1,4 +1,4 @@
-CREATE OR REPLACE PROCEDURE control_db.sps.load_testing_PK()
+CREATE OR REPLACE PROCEDURE control_db.sps.load_testing_dyntbl_PK()
 RETURNS VARCHAR NOT NULL
 LANGUAGE SQL
 AS
@@ -14,7 +14,7 @@ Flag boolean default False;
 BEGIN
 
 --PK testing assuming there is 1 column per constraint only
-show primary keys in database mytest_db;
+show primary keys in schema MYTEST_DB.POLICY_TRN_DYNTBL;
 
 rs := (
 select "constraint_name" as constraint_name, 'select count(*) cnt from (select '|| "column_name" || ' from ' || "database_name" || '.' || "schema_name" || '.' || "table_name" || ' group by ' || "column_name" || ' having count(*)>1) data;' as test_SQL
@@ -49,7 +49,12 @@ END;
 
 
 
-CREATE OR REPLACE PROCEDURE control_db.sps.load_testing_FK()
+
+
+
+
+
+CREATE OR REPLACE PROCEDURE control_db.sps.load_testing_dyntbl_FK()
 RETURNS VARCHAR NOT NULL
 LANGUAGE SQL
 AS
@@ -67,7 +72,7 @@ BEGIN
 
 --FK testing assuming there is 1 column per constraint only
 
-show IMPORTED keys in database mytest_db;
+show IMPORTED keys in schema MYTEST_DB.POLICY_TRN_DYNTBL;
 
 rs := (
 select "fk_name" as constraint_name, 'select  count(*) cnt from ( select ' || "fk_column_name" || ' from ' || "fk_database_name" || '.' || "fk_schema_name" || '.' || "fk_table_name" || ' except select ' || "pk_column_name" || ' from ' || "pk_database_name" || '.' || "pk_schema_name" || '.' || "pk_table_name" || ' ) data;' as test_SQL
@@ -100,7 +105,7 @@ END;
 
 
 
-CREATE OR REPLACE PROCEDURE control_db.sps.load_testing()
+CREATE OR REPLACE PROCEDURE control_db.sps.load_testing_dyntbl()
 RETURNS VARCHAR NOT NULL
 LANGUAGE SQL
 AS
@@ -121,15 +126,13 @@ BEGIN
 (
 select count(*) cnt ,
 sum(stg.amount) sum_amount
-from mytest_db.policy_trn_staging.stg_pt_new_data stg
+from mytest_db.policy_trn_staging.stg_pt stg
 )
 , fact as 
 (
 select count(*) cnt  ,
 sum(amount) sum_amount
-from mytest_db.policy_trn.fact_policytransaction 
-where 
-    loaddate = (select max(loaddate) from mytest_db.policy_trn.fact_policytransaction )
+from mytest_db.policy_trn_dyntbl.fact_policytransaction 
 )
 select
 staging.cnt as cnt_in_staging,
@@ -157,5 +160,4 @@ END FOR;
   
  return Flag;
 END;
-
 

@@ -1,11 +1,4 @@
-USE schema control_db.integrations;
-CREATE OR REPLACE NOTIFICATION INTEGRATION my_email_int
-  TYPE=EMAIL
-  ENABLED=TRUE;
-  
-
-
-CREATE OR REPLACE PROCEDURE control_db.sps.load_complete_notification()
+CREATE OR REPLACE PROCEDURE control_db.sps.load_complete_dyntbl_notification()
 RETURNS VARCHAR NOT NULL
 LANGUAGE SQL
 AS
@@ -22,7 +15,7 @@ BEGIN
 select table_name
 from mytest_db.information_schema.tables 
 where table_type = 'BASE TABLE' 
-and table_schema='POLICY_TRN'
+and table_schema='POLICY_TRN_DYNTBL'
 and (table_name like 'DIM%' or table_name like 'FACT%' or table_name like '%AGG%')
 and table_name<>'DIM_TRANSACTION'
 order by  table_name
@@ -33,14 +26,14 @@ order by  table_name
    table_name := record.table_name;
 
    query := 
-   'with ll as (select max(loaddate) d, count(*) t from mytest_db.policy_trn.' || table_name || ')' ||
+   'with ll as (select max(loaddate) d, count(*) t from mytest_db.POLICY_TRN_DYNTBL.' || table_name || ')' ||
    'select  ''<tr> ' ||
    ' <td>'' || ''' || table_name  ||  ''' || ''</td> ' || 
    ' <td>'' || count(*)   || ''</td> ' || 
    ' <td>'' || ll.d       || ''</td> ' || 
    ' <td>'' || ll.t       || ''</td> ' || 
    ' </tr>'' as d ' ||
-   ' from mytest_db.policy_trn.' || table_name || ' trg ' ||
+   ' from mytest_db.POLICY_TRN_DYNTBL.' || table_name || ' trg ' ||
    ' join ll ' ||
    'on 1=1 ' ||
    ' where trg.loaddate = ll.d ' ||
@@ -60,5 +53,7 @@ CALL SYSTEM$SEND_SNOWFLAKE_NOTIFICATION('{ "text/html": "' || :data || '"}','{"m
 
 return data;
 END;
+
+
 
 
