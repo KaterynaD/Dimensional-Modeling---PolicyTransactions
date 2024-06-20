@@ -2,7 +2,7 @@ Airflow + DBT + Snowflake: fact table and dimensional tables including SCD2 with
 DBT tests, orchestration log tables and load complete emails with DW tables status. 
 Airflow DAG is dynamically built based on dbt graph.
 
-![image](https://github.com/KaterynaD/Dimensional-Modeling---PolicyTransactions/assets/16999229/4df02039-ca2a-4263-b4fb-58d552797ff9)
+![Lineage Graph](https://github.com/KaterynaD/Dimensional-Modeling---PolicyTransactions/assets/16999229/47d814ce-13fe-45ca-b2e6-6c1f06b02030)
 
 ![image](https://github.com/KaterynaD/Dimensional-Modeling---PolicyTransactions/assets/16999229/4f7d769e-afb0-42a1-8e78-46c3159a7788)
 
